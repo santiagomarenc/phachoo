@@ -18,7 +18,9 @@ def main():
     root.title("Phachoo Data Analysis")
     root.geometry("1200x800")  # Set window size (optional)
     button = tk.Button(root, text="Seleccionar archivo .tsv", command=on_button_click)
-    button.pack(pady=60)
+    button.pack(pady=80)
+    button = tk.Button
+
     root.mainloop()
 
 
