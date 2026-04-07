@@ -54,30 +54,142 @@ El algoritmo por diseñar deberá ser capaz de leer los valores de las filas y l
 
 #### Ranking de fagos:
 
-**PhageID:** cada fago se le asigna el `ID` correspondiente a la entrada. Cada uno recibe las siguientes métricas.
-**Raw-Score:** Corresponde a la sumatoria de los valores de su host-range.
-**StrongCov:** Obtenido a partir de su fracción de cobertura con nivel "=4" (`fracscore4`).
-**GoodCov:** Corresponde a la cobertura útil, con nivel superior a 3 (cov>=3).
-**WideCov:** Métrica que corresponde a la amplitud 'útil', n° de cepas cubiertas con cov>=2.
-**OhmPrev:** Esta métrica sirve para identificar la prevalencia de resistentes por fago; cov=<2.
-**Depo:** (+) ó (-), presencia de depolimerasas.
-**GlobalScore:** Ponderación configurable, a partir de este se genera el ranking de fagos.
+En formato de tabla se presenta cada Fago con su métrica correspondiente, en orden descenciente tomando como base **GlobalScore**.
 
-#### Métricas p/cepa (suceptibility-score)(s-score)
+**PhageID:** cada fago se le asigna el `ID` correspondiente a la entrada. Cada uno recibe las siguientes métricas. (Lectura directa)
 
-> Las métricas por cepa tienen como objetivo principal identificar tanto a las cepas más suceptibles como posibles candidatas para ser cepas de producción de fagos, así como aquellas cepas que representen vulnerabilidad al tener poca o nula suceptibilidad.
+**Raw-Score:** Sumatoria de los valores de host-range del fago sobre todas las cepas. Valor entero, sin normalizar. Métrica informativa, no entra al GlobalScore.
 
-**StrainID:** cada cepa se le asigna el `ID` correspondiente a la entrada. Cada uno recibe las siguientes métricas.
-**Raw-Score:** Corresponde a la sumatoria de los valores de suceptibility-range.
-**StrongSub:** Obtenido a partir de su fracción de suceptibilidad con nivel "=4" (`fracscore4`).
-**ModSub:** Corresponde a la suceptibilidad significativa, con nivel superior a 3 (sub>=3). Estas últimas dos metricas representan buena suceptibilidad y posibilidad de fungir como cepas productoras de fagos.
-**OhmPrev:** Esta métrica sirve para identificar la prevalencia de resistencia en la cepa; sub=<2.
-**Vulnerability:** Esta mide la fracción cuya suceptibilidad sea sub=0. Estas últimas dos representan vulnerabilidad y necesidad de más aislamientos que las cubran.
-**S-Score:** Ponderación configurable, a partir de este se genera un informe con las cepas más suceptibles y las más vulnerables.
+**FracCov:** Fracción de cepas con score >= 1 sobre el total de cepas. Valor entre 0 y 1. Métrica de soporte interno usada como denominador en otros cálculos; se reporta al usuario pero no entra al GlobalScore.
+
+**WideCov:** Fracción de cepas con score >= 2 sobre el total de cepas. Valor entre 0 y 1. Captura la amplitud de cobertura útil mínima. Entra al GlobalScore.
+
+**StrongCov:** Métrica de calidad de cobertura. Se calcula a partir de dos conteos internos (no reportados): `n4` = cepas con score >= 4, `n3` = cepas con score = 3. La fórmula combina una perspectiva global y una local:
+
+```
+StrongCov_global = (n4 × w4 + n3 × w3) / n_cepas_totales
+StrongCov_local  = (n4 × w4 + n3 × w3) / n_cepas_cubiertas   (cepas con score >= 1)
+StrongCov        = (StrongCov_global + StrongCov_local) / 2
+```
+
+Pesos fijos: `w4 = 1.0`, `w3 = 0.5`. Valor entre 0 y 1. Entra al GlobalScore.
+
+**OhmPrev:** Fracción de cepas con score <= 2 sobre el total de cepas. Identifica la prevalencia de cobertura débil o resistentes en la colección completa. Valor entre 0 y 1. Entra al GlobalScore con peso negativo.
+
+**Depo:** (+) o (-), presencia de depolimerasas. Lectura directa desde el input. Valor nulo si no hay datos. No entra al GlobalScore; actúa como criterio de desempate en el algoritmo de selección.
+
+**RareCov:** Fracción de las cepas cubiertas por el fago (score >= 3) que son clasificadas como cepas difíciles (S-Score < 0.25). Valor entre 0 y 1. Métrica interna: no se reporta al usuario pero alimenta el algoritmo greedy como bonus para fagos que cubren cepas huérfanas. Requiere que las métricas por cepa estén calculadas previamente.
+
+**GlobalScore:** Promedio ponderado de `WideCov`, `StrongCov` y `OhmPrev` (con peso negativo). Pesos fijos en el Caso 1: `Pw = 0.5`, `Ps = 1.0`, `Po = 0.25`.
+
+```
+GlobalScore = (WideCov×0.5 + StrongCov×1.0 + (1 - OhmPrev)×0.25) / 1.75
+```
+
+Valor entre 0 y 1. A partir de este se genera el ranking de fagos y se seleccionan los candidatos al cóctel.
+
+#### Métricas p/cepa (susceptibility-score)(S-Score)
+
+Salida en formato de tabla, de cada cepa con sus métricas, en orden descendente tomando como base **S-Score**.
+
+> Las métricas por cepa tienen como objetivo principal identificar tanto las cepas más susceptibles como posibles candidatas para ser cepas de producción de fagos, así como aquellas cepas que representen vulnerabilidad al tener poca o nula susceptibilidad. El S-Score actúa como eje único del ranking: los valores altos señalan cepas productoras candidatas y los valores bajos señalan cepas vulnerables.
+
+**StrainID:** cada cepa recibe el `ID` correspondiente a la entrada.
+
+**Raw-Score:** Sumatoria de los valores de susceptibilidad de la cepa frente a todos los fagos. Valor entero, informativo, no entra al S-Score.
+
+**S-Score:** Perfil ponderado de susceptibilidad. Captura la acumulación de niveles altos (3 y 4) sobre el total de fagos, con mayor peso a los 4s. Se calcula a partir de dos conteos internos: `n4` = fagos con score >= 4 frente a la cepa, `n3` = fagos con score = 3 frente a la cepa. Pesos fijos: `w4 = 1.0`, `w3 = 0.5`.
+
+```
+S-Score = (n4 × w4 + n3 × w3) / n_fagos_totales
+```
+
+Valor entre 0 y 1. Cepas con S-Score alto son candidatas a producción. Cepas con S-Score < 0.25 se clasifican automáticamente como **cepas difíciles**: tienen cobertura insuficiente, se reportan como vulnerables y se marcan como necesidad de más aislamientos.
+
+**Vulnerability:** Fracción de fagos con score = 0 frente a la cepa, sobre el total de fagos. Valor entre 0 y 1. Métrica informativa complementaria al S-Score para identificar cepas sin ningún fago activo.
+
+```
+Vulnerability = n_score0 / n_fagos_totales
+```
+
+**NOTA:** Al finalizar el cálculo de métricas por cepa se genera una estructura interna `cepas_dificiles` con todas las cepas cuyo S-Score < 0.25. Esta estructura es consumida por el cálculo de `RareCov` en las métricas por fago, por lo que las métricas por cepa deben calcularse primero.
+
+**Alertas en el reporte:** se emiten para cepas cuyo S-Score = 0 (ningún fago las cubre) y para cepas clasificadas como difíciles (S-Score < 0.25).
 
 #### Integración de cócteles ~ Índice de similitud de fagos
 
-Una vez se tenga un listado de fagos prioritarios, se buscará generar cócteles, pero antes es necesario revisar los parametros necesarios para lo mismo. Aquí surgen los dos enfoques; con y sin complementación solapante. Solamente una vez que se tenga el listado de fagos prioritarios, el programa deberá generar índices de similitud con los fagos candidatos, de este modo ahorrando procesamiento innecesario. El programa tomará de manera iterativa uno de los fagos candidatos y se generarán índices de similitud con los demás fagos candidatos, se seleccionará uno de los fagos para cada caso (con y sin solapamiento), se tomará la unión de ambos conjuntos y se repite el ejercicio para 'n' fagos que se desee integren el cóctel. Los índices de similitud se no se imprimirán de manera explícita para el usuario, pero se guardarán si el mismo desea verlo. Sirven para generar los cócteles. Adicionalmente, de haber alguno, se seleccionarán fagos con evidencia empírica de depolimerasas, optando por el que mejor cumpla con el resto de parámetros. Un set de cócteles para cada caso será propuesto.
+Una vez se tenga un listado de fagos prioritarios, se generan dos cócteles candidatos mediante un **algoritmo greedy de cobertura marginal**, uno para cada enfoque de complementación. Los índices de similitud coseno se calculan sobre los fagos candidatos y se guardan opcionalmente si el usuario desea explorarlos, pero no son el motor de selección del cóctel.
+
+**Índice de similitud coseno**
+
+Cada fago se representa como un vector de scores frente a las cepas (excluyendo la fila `DP`, que es categórica). La similitud entre dos fagos A y B se define como:
+
+```
+cos(A, B) = (A · B) / (||A|| × ||B||)
+```
+
+El resultado es un valor entre 0 y 1. Valores cercanos a 1 indican fagos con patrones de host-range similares (redundantes). Valores cercanos a 0 indican fagos complementarios. Esta matriz se genera una sola vez sobre los fagos candidatos para evitar procesamiento innecesario.
+
+**Criterios base**
+
+1) Cobertura de cada una de las cepas, o de las máximas posibles.
+2) Prioridad a fagos con evidencia empírica de depolimerasas como criterio de desempate final.
+
+**Algoritmo greedy set cover**
+
+Primero se toman los 'n' fagos candidatos con mayor `GlobalScore`. A partir de ellos se construyen dos cócteles de tamaño configurable mediante un proceso en dos fases.
+
+**Estructura previa — cobertura de cepas difíciles**
+
+Antes de correr el greedy se construye una estructura sobre **todos los fagos** (no solo los candidatos) que mapea cada cepa difícil a los fagos que la cubren con score >= 3, ordenados por score descendente:
+
+```
+cobertura_dificiles = {
+    cepa_difícil: [fagos ordenados por score desc frente a esa cepa]
+}
+```
+
+Esta estructura es consumida en la Fase 2 del algoritmo.
+
+**Ganancia marginal ajustada**
+
+Las cepas difíciles (S-Score < 0.25) tienen peso `W = 2` dentro del cálculo de ganancia; las cepas normales tienen `W = 1`. Esto favorece naturalmente a los fagos que cubren cepas huérfanas sin introducir parámetros externos al greedy.
+
+**Fase 1 — Greedy base**
+
+*Cóctel no solapante:* en cada iteración se selecciona el fago que maximiza la suma de pesos de cepas aún no cubiertas (score >= 2):
+
+```
+ganancia = Σ W(cepa)  para cada cepa nueva con score >= 2
+           donde W = 2 si cepa es difícil, W = 1 si no
+```
+
+Las cepas ya cubiertas se descartan del cálculo siguiente.
+
+*Cóctel solapante:* en cada iteración se selecciona el fago que maximiza la suma ponderada de cobertura, donde cada cepa difícil parte con peso doble y el peso de toda cepa decae ×0.5 por cada fago que la cubre:
+
+```
+ganancia = Σ pesos[cepa] × W(cepa)  para cada cepa con score >= 2
+           donde W = 2 si cepa es difícil, W = 1 si no
+           y pesos[cepa] arranca en 1.0, decae ×0.5 por cada fago que la cubre
+```
+
+**Jerarquía de desempate en Fase 1** (igual ganancia ajustada):
+1. Mayor `GlobalScore`
+2. Presencia de `Depo` (+)
+
+**Fase 2 — Rescate de cepas difíciles**
+
+Al terminar el greedy base, se verifica qué cepas difíciles quedaron sin cobertura adecuada (ningún fago del cóctel las cubre con score >= 2). Para cada una se consulta `cobertura_dificiles` y se agrega al cóctel el mejor fago disponible:
+
+- *Cóctel no solapante:* se toma el fago de mayor score frente a esa cepa. En caso de empate, se resuelve por `GlobalScore`.
+- *Cóctel solapante:* en caso de empate en score, se agregan ambos fagos al cóctel.
+
+Si una cepa difícil no tiene ningún fago con score >= 3 en toda la colección, se reporta como irrescatable y se emite alerta de necesidad de más aislamientos.
+
+Los fagos agregados en la Fase 2 pueden estar fuera del top-n de candidatos originales. El tamaño final del cóctel puede exceder el 'n' configurado, lo cual es esperado y comunicado al usuario.
+
+**En cada ciclo:** Se proponen dos cócteles construidos a partir de los 'n' candidatos más los fagos de rescate si aplica. Ambos apuntan a los `criterios base`.
 
 
 #### Sequence Priority
@@ -89,3 +201,109 @@ Una vez se tenga un listado de fagos prioritarios, se buscará generar cócteles
 
 **NOTA:** Los cócteles propuestos en el `caso1` son meramente demostrativos y preliminares. Sirven para tener una guía y dinámica de trabajo y selección más fluida, no deben ser tomados de manera definitiva, sino como material de prueba, así como para priorizar secuenciación. A partir de los datos genómicos se generarán cócteles más finos lo que corresponde al `caso2`.
 
+
+
+
+## Algoritmo
+
+El siguiente flujo describe el procesamiento completo del Caso 1, desde la lectura del archivo de entrada hasta la generación del output. Cada etapa produce estructuras de datos que alimentan a las siguientes.
+
+---
+
+### Etapa 1 — Lectura y parsing del input
+
+El programa recibe un archivo `.tsv`. Se identifican y separan los siguientes componentes:
+
+- **Matriz de scores:** submatriz numérica con filas = cepas y columnas = fagos. Se excluyen la fila `DP`, la fila `T` y la columna `T`.
+- **Fila DP:** fila categórica con valores (+) o (-) por fago. Se almacena como un diccionario separado. Si no existe en el archivo, se registra como ausente y `Depo` retorna nulo para todos los fagos.
+- **Fila y columna T:** totales presentes en el input para referencia del usuario. Se ignoran en los cálculos; el programa genera sus propios totales.
+
+Se extraen además las listas de IDs de cepas y de fagos tal como aparecen en el input. Estas son la base de todas las estructuras posteriores.
+
+---
+
+### Etapa 2 — Métricas por cepa
+
+Se procesa cada cepa de la matriz de scores calculando `Raw-Score`, `S-Score` y `Vulnerability`. Al finalizar se generan dos estructuras:
+
+- **Ranking de cepas:** lista ordenada de mayor a menor S-Score.
+- **`cepas_dificiles`:** conjunto de IDs de cepas cuyo S-Score < 0.25. Se emiten alertas para cepas con S-Score = 0.
+
+Estas estructuras quedan disponibles para la Etapa 3.
+
+---
+
+### Etapa 3 — Métricas por fago
+
+Con `cepas_dificiles` disponible, se procesa cada fago calculando `Raw-Score`, `FracCov`, `WideCov`, `StrongCov`, `OhmPrev`, `Depo`, `RareCov` y `GlobalScore`. Internamente se calculan los conteos `n3` y `n4` necesarios para `StrongCov`.
+
+Al finalizar se construye la estructura de rescate sobre **todos los fagos**:
+
+- **`cobertura_dificiles`:** diccionario que mapea cada cepa difícil a la lista de fagos que la cubren con score >= 3, ordenados por score descendente. En caso de empate de score, se ordenan por GlobalScore descendente.
+- **Ranking de fagos:** lista ordenada de mayor a menor GlobalScore.
+
+---
+
+### Etapa 4 — Selección de candidatos
+
+Se toman los top-n fagos del ranking por GlobalScore. El valor de `n` es configurable por el usuario. Esta lista de candidatos es el input de la Etapa 5.
+
+---
+
+### Etapa 5 — Generación de cócteles
+
+Se ejecuta el greedy set cover en dos fases (Fase 1 greedy base + Fase 2 rescate de cepas difíciles) para cada modo (solapante y no solapante), produciendo dos cócteles. El proceso está descrito en detalle en la sección anterior.
+
+---
+
+### Etapa 6 — Similitud coseno (opcional)
+
+Si el usuario lo solicita, se calcula la matriz de similitud coseno sobre los fagos candidatos del top-n. Cada fago se representa como su vector de scores sobre todas las cepas (excluyendo DP). La matriz se guarda en un archivo separado.
+
+---
+
+### Etapa 7 — Output
+
+Todos los reportes se escriben como archivos `.tsv` en un directorio de salida. No hay impresión en consola. Los archivos generados son:
+
+- **ranking_fagos.tsv:** tabla con todas las métricas por fago, ordenada por GlobalScore descendente.
+- **ranking_cepas.tsv:** tabla con S-Score y Vulnerability por cepa, ordenada por S-Score descendente. Incluye columna de alerta para cepas difíciles e irrescatables.
+- **cocktail_non_overlapping.tsv:** lista de fagos del cóctel no solapante con su contribución de cobertura por cepa.
+- **cocktail_overlapping.tsv:** lista de fagos del cóctel solapante con su contribución ponderada por cepa.
+- **sequence_priority.tsv:** fagos del top-n ordenados por GlobalScore, más los fagos de rescate incorporados en la Etapa 5.
+- **similarity_matrix.tsv** (opcional): matriz de similitud coseno entre candidatos, generada solo si el usuario lo solicitó.
+
+---
+
+## Estructura
+
+```
+main()
+├── leer_input()
+├── metricas_cepa()
+├── metricas_fago()
+├── seleccionar_candidatos()
+├── generar_coctel()
+│   ├── greedy(mode="non_overlapping")
+│   └── greedy(mode="overlapping")
+├── similitud_coseno()
+└── guardar_resultados()
+```
+
+**`main()`** — Función orquestadora. Recibe los parámetros configurables del usuario (ruta del archivo, directorio de salida, n candidatos, tamaño del cóctel, umbral de cobertura, si guardar similitud), llama a cada función en orden y gestiona el flujo de datos entre ellas.
+
+**`leer_input(ruta)`** — Lee el archivo `.tsv` y separa sus componentes: matriz de scores, fila DP (si existe) y listas de IDs de cepas y fagos. Retorna estas estructuras limpias para su uso posterior.
+
+**`metricas_cepa(matriz, ids_cepas, ids_fagos)`** — Calcula Raw-Score, S-Score y Vulnerability para cada cepa. Retorna el ranking de cepas ordenado por S-Score y la estructura `cepas_dificiles`. Convención: si el denominador es 0, la métrica retorna 0.
+
+**`metricas_fago(matriz, ids_fagos, ids_cepas, depo, cepas_dificiles)`** — Calcula Raw-Score, FracCov, WideCov, StrongCov, OhmPrev, Depo, RareCov y GlobalScore para cada fago. Construye `cobertura_dificiles`. Retorna el ranking de fagos y `cobertura_dificiles`. Convención: si el denominador es 0, StrongCov_local retorna 0.
+
+**`seleccionar_candidatos(ranking_fagos, n)`** — Toma los top-n fagos del ranking por GlobalScore. Retorna la lista de candidatos.
+
+**`greedy(candidatos, matriz, cepas_dificiles, cobertura_dificiles, mode)`** — Ejecuta el algoritmo greedy en dos fases (base + rescate) para el modo indicado. Retorna el cóctel resultante como lista de fagos.
+
+**`generar_coctel(candidatos, matriz, cepas_dificiles, cobertura_dificiles)`** — Llama a `greedy()` en ambos modos y retorna los dos cócteles.
+
+**`similitud_coseno(candidatos, matriz)`** — Calcula la matriz de similitud coseno entre los fagos candidatos. Solo se ejecuta si el usuario lo solicita. Retorna la matriz y la guarda como `similarity_matrix.tsv`.
+
+**`guardar_resultados(ranking_fagos, ranking_cepas, coctel_no_solapante, coctel_solapante, directorio, similitud)`** — Escribe todos los reportes de salida como archivos `.tsv` en el directorio indicado: rankings, cócteles, alertas y lista de prioridad de secuenciación.
